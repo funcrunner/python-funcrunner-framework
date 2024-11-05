@@ -290,7 +290,10 @@ class FuncRunnerApp:
     # The main loop to pull from a queue and process items
     def run(self):
         self.logger.info("Starting Func Runner application...")
-        self.logger.info(f"Available functions: {', '.join(self.function_registry.keys())}")
+        if self.function_registry:
+            self.logger.info(f"Available functions: {', '.join(self.function_registry.keys())}")
+        else:
+            self.logger.info("No functions registered.")
         self.is_running = True
 
         if self.auto_update and self.assistant_id:
