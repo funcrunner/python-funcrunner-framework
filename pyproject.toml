@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "funcrunner"
+version = "1.0.2"
+description = "A managed function calling framework for OpenAI Assistants."
+authors = ["Matthew Orahood <morahood@gmail.com>"]
+homepage="https://funcrunner.com"
+documentation="https://docs.funcrunner.com"
+license="Proprietary"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+pytest = "^8.3.3"
+requests = "^2.32.3"
+pydantic = "^2.9.2"
+structlog = "^24.4.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
