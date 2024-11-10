@@ -2,6 +2,7 @@ import inspect
 import json
 import os
 import time
+from enum import Enum
 from functools import reduce
 from typing import Any, Callable, Dict, Optional
 
@@ -94,7 +95,6 @@ class FuncRunnerApp:
                                   correlation_id=message.correlation_id)
         return None
 
-
     def _generate_function_spec(self, func: Callable) -> dict:
         """Generates OpenAI-compatible function spec for a registered function."""
         self.logger.info(f"Generating function spec for function: '{func.__name__}'")
@@ -108,18 +108,47 @@ class FuncRunnerApp:
 
         signature = inspect.signature(func)
 
+        # Mapping Python types to OpenAI-compatible JSON types
+        type_mapping = {
+            str: "string",
+            int: "number",
+            float: "number",
+            bool: "boolean",
+            list: "array",
+            dict: "object",
+            Any: "object"
+        }
+
         for param_name, param in signature.parameters.items():
-            # Map Python types to JSON-compatible types
             param_type = param.annotation if param.annotation != inspect.Parameter.empty else str
-            json_type = "string" if param_type == str else "number" if param_type == int else "object"
 
-            # Add parameter to schema
-            parameters_schema["properties"][param_name] = {
-                "type": json_type,
-                "description": f"The {param_name} parameter."
-            }
+            # Check for Enum types
+            if isinstance(param_type, type) and issubclass(param_type, Enum):
+                json_type = "string"
+                enum_values = [e.value for e in param_type]
+                parameters_schema["properties"][param_name] = {
+                    "type": json_type,
+                    "enum": enum_values,
+                    "description": f"The {param_name} parameter (enum)."
+                }
+            else:
+                # Use type mapping for other types
+                json_type = type_mapping.get(param_type, "string")
 
-            required_params.append(param_name)
+                if param_type == list:
+                    json_type = {"type": "array", "items": {"type": "string"}}
+
+                if param_type == dict:
+                    json_type = "object"
+
+                parameters_schema["properties"][param_name] = {
+                    "type": json_type,
+                    "description": f"The {param_name} parameter."
+                }
+
+            # If a parameter is required and doesn't have a default, add it to the required list
+            if param.default == inspect.Parameter.empty:
+                required_params.append(param_name)
 
         if required_params:
             parameters_schema["required"] = required_params
@@ -127,7 +156,7 @@ class FuncRunnerApp:
         parameters_schema["additionalProperties"] = False  # Enforces strict parameter validation
 
         # Create function specification compatible with OpenAI
-        spec =  {
+        spec = {
             "type": "function",
             "function": {
                 "name": func_name,
