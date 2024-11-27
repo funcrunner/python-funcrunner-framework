@@ -1,46 +1,21 @@
 import inspect
 import json
 import os
+import signal
+import sys
+import threading
 import time
 from enum import Enum
 from functools import reduce
 from typing import Any, Callable, Dict, Optional
+from http.server import HTTPServer
 
 import requests
 import structlog
-from pydantic import BaseModel
 
-
-class Message(BaseModel):
-    id: str
-    run_id: str
-    thread_id: str
-    integration_id: str
-    correlation_id: str
-    expires_at: str
-    visible_at: str
-    in_flight: bool
-
-
-class RunResult(BaseModel):
-    run_id: str
-    thread_id: str
-    tool_outputs: list[Dict[str, str]] = []
-
-    def dump_submission_response(self):
-        return json.dumps({"tool_outputs": self.tool_outputs})
-
-
-class FunctionExecution(BaseModel):
-    name: str
-    arguments: dict[str, Any]
-    tool_call_id: str
-
-
-class FunctionExecutionPayload(BaseModel):
-    thread_id: str
-    run_id: str
-    function_executions: list[FunctionExecution] = []
+from funcrunner.exceptions import AssistantException
+from funcrunner.health import HealthHandler
+from funcrunner.models import Message, FunctionExecution, RunResult
 
 
 class FuncRunnerApp:
@@ -48,6 +23,7 @@ class FuncRunnerApp:
                  api_key: Optional[str] = None,
                  assistant_id: Optional[str] = None,
                  auto_update: bool = True,
+                 health_port: int = 8000,
                  polling_interval: float = 5.0):
         self.function_registry: Dict[str, Callable] = {}
         self.is_running = False
@@ -56,12 +32,41 @@ class FuncRunnerApp:
         self.polling_interval = polling_interval
         self.assistant_id = assistant_id
         self.auto_update = auto_update
+        self.health_port = health_port
+        self.http_server = None
+        self.http_thread = None
 
         if self.api_key is None:
             self.logger.critical(
                 "Missing Func Runner API key. Set 'FUNCRUNNER_API_KEY' environment variable or use 'api_key='")
             raise ValueError(
                 "Missing func runner API key. Set 'FUNCRUNNER_API_KEY' environment variable or use 'api_key='.")
+
+    def _start_health_server(self):
+        def serve():
+            self.http_server = HTTPServer(("0.0.0.0", self.health_port), HealthHandler)
+            self.logger.info(f"Health check endpoint listening on port {self.health_port}")
+            try:
+                self.http_server.serve_forever()
+            except Exception as e:
+                self.logger.error(f"Health server error: {e}")
+
+        self.http_thread = threading.Thread(target=serve)
+        self.http_thread.start()
+
+    def _stop_health_server(self):
+        if self.http_server:
+            self.logger.info("Shutting down health server...")
+            self.http_server.shutdown()
+            self.http_server.server_close()
+            self.http_thread.join()
+            self.logger.info("Health server shut down.")
+
+    def _signal_handler(self, sig, frame):
+        self.logger.info("Signal received. Shutting down...")
+        self.is_running = False
+        self._stop_health_server()
+        sys.exit(0)
 
     # Function decorator for registering callable functions
     def function(self, name: Optional[str] = None):
@@ -95,11 +100,11 @@ class FuncRunnerApp:
                                   correlation_id=message.correlation_id)
         return None
 
-    def _generate_function_spec(self, func: Callable) -> dict:
+    def _generate_function_spec(self, registry_key: str, func: Callable) -> dict:
         """Generates OpenAI-compatible function spec for a registered function."""
         self.logger.info(f"Generating function spec for function: '{func.__name__}'")
 
-        func_name = func.__name__
+        func_name = registry_key
         description = func.__doc__ or f"Function {func_name} with no description."
 
         # Generate JSON schema for parameters
@@ -188,12 +193,17 @@ class FuncRunnerApp:
                     updated_tools.append(tool)
                     break
 
-        function_specs = [self._generate_function_spec(func) for func in self.function_registry.values()]
+        function_specs = [self._generate_function_spec(key, func) for key, func in self.function_registry.items()]
         assistant["tools"] = updated_tools + function_specs
 
         for ro_attr in ["id", "object", "created_at"]:
             if ro_attr in assistant:
                 del assistant[ro_attr]
+
+        # If some values are none on the original record OpenAI will raise an error.
+        for none_attr in ["name", "instructions"]:
+            if none_attr in assistant and assistant[none_attr] is None:
+                del assistant[none_attr]
 
         if "description" in assistant and assistant["description"] is None:
             del assistant["description"]
@@ -202,6 +212,7 @@ class FuncRunnerApp:
         if update_resp.status_code != 200:
             self.logger.error(f"Failed to update assistant", url=url, status_code=update_resp.status_code,
                               error=update_resp.text)
+            raise AssistantException(f"Failed to update the assistant with function specifications: {update_resp.text}")
 
         self.logger.info("Finished updating assistant functions...", assistant_id=self.assistant_id)
 
@@ -243,7 +254,7 @@ class FuncRunnerApp:
             return function(*bound_args.args, **bound_args.kwargs)
         except TypeError as e:
             self.logger.error(f"Argument error when calling function", function_name=fe.name, error=str(e),
-                              message=message.dict(), correlation_id=message.correlation_id)
+                              message=message.model_dump(), correlation_id=message.correlation_id)
             raise ValueError(f"Argument error when calling '{fe.name}': {str(e)}")
 
     def _process_queue_message(self, message: Message) -> Optional[RunResult]:
@@ -292,7 +303,10 @@ class FuncRunnerApp:
                          correlation_id=messages[0].get("correlation_id"))
         return Message(**messages[0])
 
-    def _delete_message(self, message_id, correlation_id) -> Optional[Message]:
+    def _delete_message(self, message: Message) -> Optional[Message]:
+        message_id = message.id
+        correlation_id = message.correlation_id
+
         self.logger.info(f"Deleting message from the queue", message_id=message_id, correlation_id=correlation_id)
         resp = self._make_request('delete', f"https://queue.funcrunner.com/messages/{message_id}")
         if resp is None or resp.status_code != 200:
@@ -328,6 +342,13 @@ class FuncRunnerApp:
         if self.auto_update and self.assistant_id:
             self._configure_assistant()
 
+        # Set up signal handler for graceful shutdown
+        signal.signal(signal.SIGINT, self._signal_handler)
+        signal.signal(signal.SIGTERM, self._signal_handler)
+
+        # Start health check server
+        self._start_health_server()
+
         try:
             while self.is_running:
                 message = self._dequeue_message()
@@ -340,7 +361,7 @@ class FuncRunnerApp:
                 if run_result:
                     success = self._submit_function_results(run_result)
                 if success:
-                    self._delete_message(message.id, message.correlation_id)
+                    self._delete_message(message)
 
                 time.sleep(self.polling_interval)
         except KeyboardInterrupt:
@@ -349,5 +370,6 @@ class FuncRunnerApp:
 
     # Function to stop the app loop
     def stop(self):
+        self._stop_health_server()
         self.is_running = False
         self.logger.info("Func Runner application stopped")

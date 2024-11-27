@@ -2,53 +2,10 @@ from funcrunner.app import FuncRunnerApp, Message
 from typing import Any
 from enum import Enum
 
-
-# Define an Enum for testing
-class StatusEnum(Enum):
-    PENDING = "pending"
-    APPROVED = "approved"
-    REJECTED = "rejected"
+import requests
 
 
-def test_application():
-    # Step 1: Create an instance of the app
-    app = FuncRunnerApp(api_key="testkey")
-
-    # Step 2: Register different types of functions using the app's decorator
-
-    # Function with a string parameter
-    @app.function()
-    def greet(name: str):
-        return f"Hello, {name}!"
-
-    # Function with a number parameter
-    @app.function()
-    def add_numbers(a: int, b: float):
-        return a + b
-
-    # Function with a boolean parameter
-    @app.function()
-    def check_status(is_active: bool):
-        return "Active" if is_active else "Inactive"
-
-    # Function with an array parameter
-    @app.function()
-    def list_summary(items: list[str]):
-        return f"You have {len(items)} items."
-
-    # Function with an object parameter as a dict
-    @app.function()
-    def user_info(user: dict[str, Any]):
-        return f"User {user['username']} is {user['age']} years old."
-
-    # Function with an enum parameter
-    @app.function()
-    def review_status(status: StatusEnum):
-        if isinstance(status, str):
-            status = StatusEnum(status)
-        return f"The review status is {status.value}."
-
-    # Step 3: Create mock Message objects for each function to be processed by the app
+def test_application(application):
     queue_items = [
         Message(
             id="1",
@@ -123,19 +80,30 @@ def test_application():
     ]
 
     # Step 4: Mock the _fetch_run_data method to return the mock run data
-    app._fetch_run_data = lambda message: mock_run_data[int(message.id) - 1] if int(message.id) <= len(mock_run_data) else None
+    application._fetch_run_data = lambda message: mock_run_data[int(message.id) - 1] if int(message.id) <= len(mock_run_data) else None
 
     # Step 5: Process each Message object and get the results
     for message in queue_items:
-        result = app._process_queue_message(message)
+        result = application._process_queue_message(message)
 
         # Step 6: Verify the results are as expected
         assert result is not None, f"Result for Message ID {message.id} should not be None."
         print(f"Message ID '{message.id}' processed successfully with result: {result}")
 
     # Step 7: Test function spec generation for all registered functions
-    functions_to_test = [greet, add_numbers, check_status, list_summary, user_info, review_status]
+    functions_to_test = ["greet", "greet_in_spanish", "add_numbers", "check_status", "list_summary", "user_info", "review_status"]
     for func in functions_to_test:
-        spec = app._generate_function_spec(func)
-        assert spec is not None, f"Function spec for '{func.__name__}' should not be None."
-        print(f"Function spec for '{func.__name__}' generated successfully: {spec}")
+        kallable = application.function_registry[func]
+        spec = application._generate_function_spec(func, kallable)
+        assert spec is not None, f"Function spec for '{kallable.__name__}' should not be None."
+        print(f"Function spec for '{kallable.__name__}' generated successfully: {spec}")
+
+def test_health_check(application):
+    app: FuncRunnerApp = application
+    app.health_port = 7777
+    app._start_health_server()
+
+    r = requests.get("http://localhost:7777/up")
+    assert r.status_code == 200
+
+    app._stop_health_server()
