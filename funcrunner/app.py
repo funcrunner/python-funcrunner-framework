@@ -24,7 +24,8 @@ class FuncRunnerApp:
                  assistant_id: Optional[str] = None,
                  auto_update: bool = True,
                  health_port: int = 8000,
-                 polling_interval: float = 5.0):
+                 polling_interval: float = 5.0,
+                 enable_local_services: bool = False):
         self.function_registry: Dict[str, Callable] = {}
         self.is_running = False
         self.logger = structlog.get_logger()
@@ -35,6 +36,13 @@ class FuncRunnerApp:
         self.health_port = health_port
         self.http_server = None
         self.http_thread = None
+
+        if enable_local_services:
+            self.proxy_base_url = "https://localhost:8080"
+            self.queue_base_url = "https://localhost:8081"
+        else:
+            self.proxy_base_url = "https://proxy.funcrunner.com"
+            self.queue_base_url = "https://queue.funcrunner.com"
 
         if self.api_key is None:
             self.logger.critical(
@@ -88,7 +96,7 @@ class FuncRunnerApp:
         return decorator
 
     def _fetch_run_data(self, message: Message):
-        url = f"https://proxy.funcrunner.com/v1/threads/{message.thread_id}/runs/{message.run_id}"
+        url = f"{self.proxy_base_url}/v1/threads/{message.thread_id}/runs/{message.run_id}"
         self.logger.debug(f"Fetching run data from URL: {url}", message_id=message.id, run_id=message.run_id,
                           correlation_id=message.correlation_id)
         response = self._make_request('get', url, message)
@@ -177,7 +185,7 @@ class FuncRunnerApp:
         """Registers all functions in function_registry with an OpenAI assistant."""
         self.logger.info("Updating assistant functions...", assistant_id=self.assistant_id)
 
-        url = f"https://proxy.funcrunner.com/v1/assistants/{self.assistant_id}"
+        url = f"{self.proxy_base_url}/v1/assistants/{self.assistant_id}"
         resp = self._make_request('get', url)
 
         if resp.status_code != 200:
@@ -284,7 +292,7 @@ class FuncRunnerApp:
 
     def _submit_function_results(self, result: RunResult) -> bool:
         self.logger.info(f"Submitting function results", run_id=result.run_id, correlation_id=result.thread_id)
-        url = f"https://proxy.funcrunner.com/v1/threads/{result.thread_id}/runs/{result.run_id}/submit_tool_outputs"
+        url = f"{self.proxy_base_url}/v1/threads/{result.thread_id}/runs/{result.run_id}/submit_tool_outputs"
         resp = self._make_request('post', url, None, result.dump_submission_response())
         if resp is None or resp.status_code != 200:
             return False
@@ -293,7 +301,7 @@ class FuncRunnerApp:
         return True
 
     def _dequeue_message(self) -> Optional[Message]:
-        resp = self._make_request('get', "https://queue.funcrunner.com/messages")
+        resp = self._make_request('get', f"{self.queue_base_url}/messages")
         if resp is None or resp.status_code != 200:
             return None
         messages = resp.json()
@@ -308,7 +316,7 @@ class FuncRunnerApp:
         correlation_id = message.correlation_id
 
         self.logger.info(f"Deleting message from the queue", message_id=message_id, correlation_id=correlation_id)
-        resp = self._make_request('delete', f"https://queue.funcrunner.com/messages/{message_id}")
+        resp = self._make_request('delete', f"{self.queue_base_url}/messages/{message_id}")
         if resp is None or resp.status_code != 200:
             return None
         self.logger.info(f"Successfully deleted queue message", message_id=message_id, correlation_id=correlation_id)

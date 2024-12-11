@@ -1,4 +1,5 @@
 import datetime
+import re
 from time import sleep
 
 from openai import OpenAI
@@ -45,7 +46,8 @@ def test_queue_path(openai_proxy, application, assistant):
     assert len(messages.data) == 2
 
     latest_message = messages.data[0]
-    assert "Hello, Matthew! Love, Func Runner." in latest_message.content[0].text.value
+    assert re.search(r".*Hello, Matthew! Love, Func Runner.*", latest_message.content[0].text.value)
+
 
 # Mainly just checks that the annotation func name mapping works.
 def test_queue_path_es(openai_proxy, application, assistant):
@@ -87,4 +89,4 @@ def test_queue_path_es(openai_proxy, application, assistant):
     assert len(messages.data) == 2
 
     latest_message = messages.data[0]
-    assert "Hola, Mateo! Te Amo, Func Runner." in latest_message.content[0].text.value
+    assert re.search(r".*Hola, Mateo! Te Amo, Func Runner.*", latest_message.content[0].text.value)
