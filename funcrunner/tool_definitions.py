@@ -92,7 +92,7 @@ def build_tool_definition(func: Callable, override_name: str = None) -> ToolDefi
             case ParamType.FLOAT:
                 func_definition.parameters.properties[param_name] = build_number_property(param)
             case ParamType.BOOLEAN:
-                func_definition.parameters.properties[param_name] = build_number_property(param)
+                func_definition.parameters.properties[param_name] = build_boolean_property(param)
             case ParamType.LIST:
                 func_definition.parameters.properties[param_name] = build_array_property(param)
             case ParamType.OBJECT:
