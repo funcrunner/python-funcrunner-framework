@@ -114,7 +114,7 @@ def build_number_property(prop: inspect.Parameter) -> PropertyDefinition:
 
 
 def build_boolean_property(prop: inspect.Parameter) -> PropertyDefinition:
-    return PropertyDefinition(type="number")
+    return PropertyDefinition(type="boolean")
 
 
 def build_object_property(prop: inspect.Parameter) -> ParameterPropertyDefinition:

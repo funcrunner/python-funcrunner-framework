@@ -29,6 +29,32 @@ def test_string_method():
         'type': 'function'
     }
 
+def test_boolean_method():
+    def set_enabled(enabled: bool) -> str:
+        pass
+
+    definition = build_tool_definition(set_enabled)
+    spec = definition.model_dump(exclude_none=True, by_alias=True)
+    assert spec == {
+        'function': {
+            'description': 'Description not given',
+            'name': 'set_enabled',
+            'parameters': {
+                'additionalProperties': False,
+                'properties': {
+                    'enabled': {
+                        'description': 'Description not given',
+                        'type': 'boolean'
+                    }
+                },
+                'required': ['enabled'],
+                'type': 'object'
+            },
+            'strict': True
+        },
+        'type': 'function'
+    }
+
 
 def test_list_method():
     def list_summary(items: list[str]):
