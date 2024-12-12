@@ -1,8 +1,18 @@
-from funcrunner.app import FuncRunnerApp, Message
-from typing import Any
-from enum import Enum
-
 import requests
+
+from funcrunner.app import FuncRunnerApp
+from funcrunner.models import Message
+
+
+def test_health_check(application):
+    app: FuncRunnerApp = application
+    app.health_port = 7777
+    app._start_health_server()
+
+    r = requests.get("http://localhost:7777/up")
+    assert r.status_code == 200
+
+    app._stop_health_server()
 
 
 def test_application(application):
@@ -71,16 +81,25 @@ def test_application(application):
 
     # Mock run data for tool calls
     mock_run_data = [
-        {"required_action": {"submit_tool_outputs": {"tool_calls": [{"function": {"name": "greet", "arguments": "{\"name\": \"Alice\"}"}, "id": "tc1"}]}}},
-        {"required_action": {"submit_tool_outputs": {"tool_calls": [{"function": {"name": "add_numbers", "arguments": "{\"a\": 5, \"b\": 3.2}"}, "id": "tc2"}]}}},
-        {"required_action": {"submit_tool_outputs": {"tool_calls": [{"function": {"name": "check_status", "arguments": "{\"is_active\": true}"}, "id": "tc3"}]}}},
-        {"required_action": {"submit_tool_outputs": {"tool_calls": [{"function": {"name": "list_summary", "arguments": "{\"items\": [\"apple\", \"banana\", \"cherry\"]}"}, "id": "tc4"}]}}},
-        {"required_action": {"submit_tool_outputs": {"tool_calls": [{"function": {"name": "user_info", "arguments": "{\"user\": {\"username\": \"johndoe\", \"age\": 30}}"}, "id": "tc5"}]}}},
-        {"required_action": {"submit_tool_outputs": {"tool_calls": [{"function": {"name": "review_status", "arguments": "{\"status\": \"approved\"}"}, "id": "tc6"}]}}}
+        {"required_action": {"submit_tool_outputs": {
+            "tool_calls": [{"function": {"name": "greet", "arguments": "{\"name\": \"Alice\"}"}, "id": "tc1"}]}}},
+        {"required_action": {"submit_tool_outputs": {"tool_calls": [
+            {"function": {"name": "add_numbers", "arguments": "{\"a\": 5, \"b\": 3.2}"}, "id": "tc2"}]}}},
+        {"required_action": {"submit_tool_outputs": {"tool_calls": [
+            {"function": {"name": "check_status", "arguments": "{\"is_active\": true}"}, "id": "tc3"}]}}},
+        {"required_action": {"submit_tool_outputs": {"tool_calls": [
+            {"function": {"name": "list_summary", "arguments": "{\"items\": [\"apple\", \"banana\", \"cherry\"]}"},
+             "id": "tc4"}]}}},
+        {"required_action": {"submit_tool_outputs": {"tool_calls": [
+            {"function": {"name": "user_info", "arguments": "{\"user\": {\"username\": \"johndoe\", \"age\": 30}}"},
+             "id": "tc5"}]}}},
+        {"required_action": {"submit_tool_outputs": {"tool_calls": [
+            {"function": {"name": "review_status", "arguments": "{\"status\": \"approved\"}"}, "id": "tc6"}]}}}
     ]
 
     # Step 4: Mock the _fetch_run_data method to return the mock run data
-    application._fetch_run_data = lambda message: mock_run_data[int(message.id) - 1] if int(message.id) <= len(mock_run_data) else None
+    application._fetch_run_data = lambda message: mock_run_data[int(message.id) - 1] if int(message.id) <= len(
+        mock_run_data) else None
 
     # Step 5: Process each Message object and get the results
     for message in queue_items:
@@ -91,19 +110,10 @@ def test_application(application):
         print(f"Message ID '{message.id}' processed successfully with result: {result}")
 
     # Step 7: Test function spec generation for all registered functions
-    functions_to_test = ["greet", "greet_in_spanish", "add_numbers", "check_status", "list_summary", "user_info", "review_status"]
+    functions_to_test = ["greet", "greet_in_spanish", "add_numbers", "check_status", "list_summary", "user_info",
+                         "review_status"]
     for func in functions_to_test:
         kallable = application.function_registry[func]
         spec = application._generate_function_spec(func, kallable)
         assert spec is not None, f"Function spec for '{kallable.__name__}' should not be None."
         print(f"Function spec for '{kallable.__name__}' generated successfully: {spec}")
-
-def test_health_check(application):
-    app: FuncRunnerApp = application
-    app.health_port = 7777
-    app._start_health_server()
-
-    r = requests.get("http://localhost:7777/up")
-    assert r.status_code == 200
-
-    app._stop_health_server()

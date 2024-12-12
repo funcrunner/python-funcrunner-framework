@@ -16,6 +16,7 @@ import structlog
 from funcrunner.exceptions import AssistantException
 from funcrunner.health import HealthHandler
 from funcrunner.models import Message, FunctionExecution, RunResult
+from funcrunner.tool_definitions import build_tool_definition
 
 
 class FuncRunnerApp:
@@ -111,92 +112,10 @@ class FuncRunnerApp:
     def _generate_function_spec(self, registry_key: str, func: Callable) -> dict:
         """Generates OpenAI-compatible function spec for a registered function."""
         self.logger.info(f"Generating function spec for function: '{func.__name__}'")
+        definition = build_tool_definition(func=func, override_name=registry_key)
 
-        func_name = registry_key
-        description = func.__doc__ or f"Function {func_name} with no description."
+        return definition.model_dump(by_alias=True, exclude_none=True)
 
-        # Generate JSON schema for parameters
-        parameters_schema = {"type": "object", "properties": {}}
-        required_params = []
-
-        signature = inspect.signature(func)
-
-        # Mapping Python types to OpenAI-compatible JSON types
-        type_mapping = {
-            str: "string",
-            int: "number",
-            float: "number",
-            bool: "boolean",
-            list: "array",
-            dict: "object",
-            Any: "object"
-        }
-
-        for param_name, param in signature.parameters.items():
-            param_type = param.annotation if param.annotation != inspect.Parameter.empty else str
-            param_schema = {}
-
-            # Check for Enum types
-            if isinstance(param_type, type) and issubclass(param_type, Enum):
-                param_schema.update({
-                    "type": "string",
-                    "enum": [e.value for e in param_type],
-                    "description": f"The {param_name} parameter (enum)."
-                })
-            else:
-                param_schema.update({"type": type_mapping.get(param_type, "string")})
-
-                if get_origin(param_type) == list:
-                    param_schema.update({"type": "array", "items": {"type": self.__map_list_type(param_type)}})
-
-                if get_origin(param_type) == dict:
-                    param_schema.update({"type": "object"})
-
-                param_schema.update({"description": f"The {param_name} parameter."})
-                parameters_schema["properties"][param_name] = param_schema
-
-            # If a parameter is required and doesn't have a default, add it to the required list
-            if param.default == inspect.Parameter.empty:
-                required_params.append(param_name)
-
-        if required_params:
-            parameters_schema["required"] = required_params
-
-        parameters_schema["additionalProperties"] = False  # Enforces strict parameter validation
-
-        # Create function specification compatible with OpenAI
-        spec = {
-            "type": "function",
-            "function": {
-                "name": func_name,
-                "description": description,
-                "parameters": parameters_schema,
-                "strict": True
-            }
-        }
-        self.logger.debug(f"Generated function spec for function: '{func_name}'", spec=spec)
-        return spec
-
-    @staticmethod
-    def __map_list_type(param_type: type):
-        args = get_args(param_type)
-
-        if args and args[0] == str:
-            return "string"
-        elif args and args[0] == int:
-            return "number"
-        elif args and args[0] == float:
-            return "number"
-        elif args and args[0] == bool:
-            return "boolean"
-        elif args and args[0] == dict:
-            return "object"
-        elif args and args[0] == Any:
-            return "object"
-        elif args and isinstance(args[0], type) and issubclass(args[0], Enum):
-            return "string"
-        else:
-            return "string"
 
     def _configure_assistant(self):
         """Registers all functions in function_registry with an OpenAI assistant."""
