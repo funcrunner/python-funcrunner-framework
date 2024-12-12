@@ -76,6 +76,7 @@ def test_dict_method():
                 'properties': {
                     'user': {
                         'additionalProperties': False,
+                        'description': 'Description not given',
                         'properties': {},
                         'required': [],
                         'type': 'object'

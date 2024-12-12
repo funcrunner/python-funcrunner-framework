@@ -118,7 +118,7 @@ def build_boolean_property(prop: inspect.Parameter) -> PropertyDefinition:
 
 
 def build_object_property(prop: inspect.Parameter) -> ParameterPropertyDefinition:
-    return ParameterDefinition(type="object")
+    return ParameterPropertyDefinition(type="object")
 
 
 def build_array_property(prop: inspect.Parameter) -> PropertyDefinition:
