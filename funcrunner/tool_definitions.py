@@ -162,7 +162,7 @@ def build_property(param: Any):
         case ParamType.FLOAT:
             return build_number_property(param)
         case ParamType.BOOLEAN:
-            return build_number_property(param)
+            return build_boolean_property(param)
         case ParamType.LIST:
             return build_array_property(param)
         case ParamType.OBJECT:
