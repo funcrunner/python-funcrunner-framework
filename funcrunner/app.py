@@ -7,8 +7,8 @@ import threading
 import time
 from enum import Enum
 from functools import reduce
-from typing import Any, Callable, Dict, Optional
 from http.server import HTTPServer
+from typing import Any, Callable, Dict, Optional, get_args, get_origin
 
 import requests
 import structlog
@@ -134,30 +134,26 @@ class FuncRunnerApp:
 
         for param_name, param in signature.parameters.items():
             param_type = param.annotation if param.annotation != inspect.Parameter.empty else str
+            param_schema = {}
 
             # Check for Enum types
             if isinstance(param_type, type) and issubclass(param_type, Enum):
-                json_type = "string"
-                enum_values = [e.value for e in param_type]
-                parameters_schema["properties"][param_name] = {
-                    "type": json_type,
-                    "enum": enum_values,
+                param_schema.update({
+                    "type": "string",
+                    "enum": [e.value for e in param_type],
                     "description": f"The {param_name} parameter (enum)."
-                }
+                })
             else:
-                # Use type mapping for other types
-                json_type = type_mapping.get(param_type, "string")
+                param_schema.update({"type": type_mapping.get(param_type, "string")})
 
-                if param_type == list:
-                    json_type = {"type": "array", "items": {"type": "string"}}
+                if get_origin(param_type) == list:
+                    param_schema.update({"type": "array", "items": {"type": self.__map_list_type(param_type)}})
 
-                if param_type == dict:
-                    json_type = "object"
+                if get_origin(param_type) == dict:
+                    param_schema.update({"type": "object"})
 
-                parameters_schema["properties"][param_name] = {
-                    "type": json_type,
-                    "description": f"The {param_name} parameter."
-                }
+                param_schema.update({"description": f"The {param_name} parameter."})
+                parameters_schema["properties"][param_name] = param_schema
 
             # If a parameter is required and doesn't have a default, add it to the required list
             if param.default == inspect.Parameter.empty:
@@ -180,6 +176,27 @@ class FuncRunnerApp:
         }
         self.logger.debug(f"Generated function spec for function: '{func_name}'", spec=spec)
         return spec
+
+    @staticmethod
+    def __map_list_type(param_type: type):
+        args = get_args(param_type)
+
+        if args and args[0] == str:
+            return "string"
+        elif args and args[0] == int:
+            return "number"
+        elif args and args[0] == float:
+            return "number"
+        elif args and args[0] == bool:
+            return "boolean"
+        elif args and args[0] == dict:
+            return "object"
+        elif args and args[0] == Any:
+            return "object"
+        elif args and isinstance(args[0], type) and issubclass(args[0], Enum):
+            return "string"
+        else:
+            return "string"
 
     def _configure_assistant(self):
         """Registers all functions in function_registry with an OpenAI assistant."""
