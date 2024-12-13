@@ -5,13 +5,14 @@ import signal
 import sys
 import threading
 import time
-from enum import Enum
 from functools import reduce
 from http.server import HTTPServer
-from typing import Any, Callable, Dict, Optional, get_args, get_origin
+from typing import Callable, Dict, Optional
 
 import requests
 import structlog
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 from funcrunner.exceptions import AssistantException
 from funcrunner.health import HealthHandler
@@ -28,6 +29,8 @@ class FuncRunnerApp:
                  polling_interval: float = 5.0,
                  enable_local_services: bool = False):
         self.function_registry: Dict[str, Callable] = {}
+        self.cron_registry: Dict[str, Callable] = {}
+        self.scheduler = BackgroundScheduler()
         self.is_running = False
         self.logger = structlog.get_logger()
         self.api_key = api_key if api_key else os.environ.get("FUNCRUNNER_API_KEY")
@@ -39,11 +42,11 @@ class FuncRunnerApp:
         self.http_thread = None
 
         if enable_local_services:
-            self.proxy_base_url = "https://localhost:8080"
-            self.queue_base_url = "https://localhost:8081"
+            self.proxy_host = "https://localhost:8080"
+            self.queue_host = "https://localhost:8081"
         else:
-            self.proxy_base_url = "https://proxy.funcrunner.com"
-            self.queue_base_url = "https://queue.funcrunner.com"
+            self.proxy_host = "https://proxy.funcrunner.com"
+            self.queue_host = "https://queue.funcrunner.com"
 
         if self.api_key is None:
             self.logger.critical(
@@ -96,8 +99,20 @@ class FuncRunnerApp:
 
         return decorator
 
+    def schedule(self, cron_expression: str):
+        """Decorator for scheduling functions."""
+
+        def decorator(func: Callable):
+            self.logger.info(f"Registering scheduled function '{func.__name__}' with cron '{cron_expression}'")
+            trigger = CronTrigger.from_crontab(cron_expression)
+            self.scheduler.add_job(func, trigger)
+            self.cron_registry[func.__name__] = cron_expression
+            return func
+
+        return decorator
+
     def _fetch_run_data(self, message: Message):
-        url = f"{self.proxy_base_url}/v1/threads/{message.thread_id}/runs/{message.run_id}"
+        url = f"{self.proxy_host}/v1/threads/{message.thread_id}/runs/{message.run_id}"
         self.logger.debug(f"Fetching run data from URL: {url}", message_id=message.id, run_id=message.run_id,
                           correlation_id=message.correlation_id)
         response = self._make_request('get', url, message)
@@ -121,7 +136,7 @@ class FuncRunnerApp:
         """Registers all functions in function_registry with an OpenAI assistant."""
         self.logger.info("Updating assistant functions...", assistant_id=self.assistant_id)
 
-        url = f"{self.proxy_base_url}/v1/assistants/{self.assistant_id}"
+        url = f"{self.proxy_host}/v1/assistants/{self.assistant_id}"
         resp = self._make_request('get', url)
 
         if resp.status_code != 200:
@@ -228,7 +243,7 @@ class FuncRunnerApp:
 
     def _submit_function_results(self, result: RunResult) -> bool:
         self.logger.info(f"Submitting function results", run_id=result.run_id, correlation_id=result.thread_id)
-        url = f"{self.proxy_base_url}/v1/threads/{result.thread_id}/runs/{result.run_id}/submit_tool_outputs"
+        url = f"{self.proxy_host}/v1/threads/{result.thread_id}/runs/{result.run_id}/submit_tool_outputs"
         resp = self._make_request('post', url, None, result.dump_submission_response())
         if resp is None or resp.status_code != 200:
             return False
@@ -237,7 +252,7 @@ class FuncRunnerApp:
         return True
 
     def _dequeue_message(self) -> Optional[Message]:
-        resp = self._make_request('get', f"{self.queue_base_url}/messages")
+        resp = self._make_request('get', f"{self.queue_host}/messages")
         if resp is None or resp.status_code != 200:
             return None
         messages = resp.json()
@@ -252,7 +267,7 @@ class FuncRunnerApp:
         correlation_id = message.correlation_id
 
         self.logger.info(f"Deleting message from the queue", message_id=message_id, correlation_id=correlation_id)
-        resp = self._make_request('delete', f"{self.queue_base_url}/messages/{message_id}")
+        resp = self._make_request('delete', f"{self.queue_host}/messages/{message_id}")
         if resp is None or resp.status_code != 200:
             return None
         self.logger.info(f"Successfully deleted queue message", message_id=message_id, correlation_id=correlation_id)
@@ -281,7 +296,13 @@ class FuncRunnerApp:
             self.logger.info(f"Available functions: {', '.join(self.function_registry.keys())}")
         else:
             self.logger.info("No functions registered.")
+        if self.cron_registry:
+            self.logger.info(f"Scheduled functions: {', '.join(self.cron_registry.keys())}")
+        else:
+            self.logger.info("No scheduled tasks registered.")
+
         self.is_running = True
+        self.scheduler.start()
 
         if self.auto_update and self.assistant_id:
             self._configure_assistant()
@@ -315,5 +336,6 @@ class FuncRunnerApp:
     # Function to stop the app loop
     def stop(self):
         self._stop_health_server()
+        self.scheduler.shutdown()
         self.is_running = False
         self.logger.info("Func Runner application stopped")

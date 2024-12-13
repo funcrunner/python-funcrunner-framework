@@ -21,6 +21,10 @@ class StatusEnum(Enum):
 def application():
     app = FuncRunnerApp()
 
+    @app.schedule("0/15 * * * *")
+    def test_task():
+        print("This is a scheduled task test!")
+
     # Function with a string parameter
     @app.function()
     def greet(name: str):
