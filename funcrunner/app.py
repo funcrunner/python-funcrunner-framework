@@ -214,7 +214,11 @@ class FuncRunnerApp:
         except TypeError as e:
             self.logger.error(f"Argument error when calling function", function_name=fe.name, error=str(e),
                               message=message.model_dump(), correlation_id=message.correlation_id)
-            raise ValueError(f"Argument error when calling '{fe.name}': {str(e)}")
+            return f"Argument error when calling '{fe.name}': {str(e)}"
+        except Exception as e:
+            self.logger.error(f"nhandled exception when calling function", function_name=fe.name, error=str(e),
+                              message=message.model_dump(), correlation_id=message.correlation_id)
+            return f"Unhandled exception when calling function '{fe.name}': {str(e)}"
 
     def _process_queue_message(self, message: Message) -> Optional[RunResult]:
         self.logger.info(f"Processing queue message", message_id=message.id, correlation_id=message.correlation_id)
