@@ -42,8 +42,8 @@ class FuncRunnerApp:
         self.http_thread = None
 
         if enable_local_services:
-            self.proxy_host = "https://localhost:8080"
-            self.queue_host = "https://localhost:8081"
+            self.proxy_host = "http://localhost:8080"
+            self.queue_host = "http://localhost:8081"
         else:
             self.proxy_host = "https://proxy.funcrunner.com"
             self.queue_host = "https://queue.funcrunner.com"
