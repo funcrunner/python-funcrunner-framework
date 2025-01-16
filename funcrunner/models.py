@@ -1,19 +1,22 @@
 import json
-from typing import Any
+from typing import Any, Union, Literal
 
 from pydantic import BaseModel, Field
 
 
 class Message(BaseModel):
     id: str
-    run_id: str
-    thread_id: str
     integration_id: str
     correlation_id: str
+    object: Literal["openai_run", "openai_chat_completion", "anthropic_messages"]
+    body: Union["OpenAIRunBody"]
     expires_at: str
     visible_at: str
     in_flight: bool
 
+class OpenAIRunBody(BaseModel):
+    run_id: str
+    thread_id: str
 
 class RunResult(BaseModel):
     run_id: str

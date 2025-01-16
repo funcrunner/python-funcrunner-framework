@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "funcrunner"
-version = "1.1.7"
+version = "1.1.9"
 description = "A managed function calling framework for OpenAI Assistants."
 authors = ["Matthew Orahood <morahood@gmail.com>"]
 homepage="https://funcrunner.com"
