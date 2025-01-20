@@ -1,8 +1,6 @@
 import datetime
-import re
 from time import sleep
 
-import pytest
 from openai import OpenAI
 
 from funcrunner.app import FuncRunnerApp
@@ -28,10 +26,10 @@ def test_queue_path(openai_proxy, application, assistant):
 
     while datetime.datetime.now(datetime.UTC) < expiration:
         message = app._dequeue_message()
-        if message and message.run_id == run.id:
+        if message and message.body["run_id"] == run.id:
             run_result = app._process_queue_message(message)
 
-            app._submit_function_results(run_result)
+            app._submit_openai_run_results(run_result)
             app._delete_message(message)
             break
         sleep(1)
@@ -70,10 +68,10 @@ def test_queue_path_es(openai_proxy, application, assistant):
 
     while datetime.datetime.now(datetime.UTC) < expiration:
         message = app._dequeue_message()
-        if message and message.run_id == run.id:
+        if message and message.body["run_id"] == run.id:
             run_result = app._process_queue_message(message)
 
-            app._submit_function_results(run_result)
+            app._submit_openai_run_results(run_result)
             app._delete_message(message)
             break
         sleep(1)

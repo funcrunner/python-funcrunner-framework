@@ -13,10 +13,11 @@ import requests
 import structlog
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from openai.types.chat import ChatCompletion
 
 from funcrunner.exceptions import AssistantException
 from funcrunner.health import HealthHandler
-from funcrunner.models import Message, FunctionExecution, RunResult
+from funcrunner.models import Message, FunctionExecution, ExecutionResult, ExecType
 from funcrunner.tool_definitions import build_tool_definition
 
 
@@ -112,8 +113,8 @@ class FuncRunnerApp:
         return decorator
 
     def _fetch_run_data(self, message: Message):
-        url = f"{self.proxy_host}/v1/threads/{message.thread_id}/runs/{message.run_id}"
-        self.logger.debug(f"Fetching run data from URL: {url}", message_id=message.id, run_id=message.run_id,
+        url = f"{self.proxy_host}/v1/threads/{message.body.get("thread_id")}/runs/{message.body.get("run_id")}"
+        self.logger.debug(f"Fetching run data from URL: {url}", message_id=message.id, run_id=message.body.get("run_id"),
                           correlation_id=message.correlation_id)
         response = self._make_request('get', url, message)
         if response is not None and response.status_code == 200:
@@ -130,7 +131,6 @@ class FuncRunnerApp:
         definition = build_tool_definition(func=func, override_name=registry_key)
 
         return definition.model_dump(by_alias=True, exclude_none=True)
-
 
     def _configure_assistant(self):
         """Registers all functions in function_registry with an OpenAI assistant."""
@@ -176,7 +176,7 @@ class FuncRunnerApp:
         self.logger.info("Finished updating assistant functions...", assistant_id=self.assistant_id)
 
     @staticmethod
-    def _extract_tool_calls(run: dict):
+    def _extract_run_tool_calls(run: dict):
         tool_calls = reduce(lambda d, k: d.get(k, {}), ["required_action", "submit_tool_outputs", "tool_calls"], run)
         if not isinstance(tool_calls, list):
             tool_calls = []
@@ -220,32 +220,56 @@ class FuncRunnerApp:
                               message=message.model_dump(), correlation_id=message.correlation_id)
             return f"Unhandled exception when calling function '{fe.name}': {str(e)}"
 
-    def _process_queue_message(self, message: Message) -> Optional[RunResult]:
+    def _process_queue_message(self, message: Message) -> Optional[ExecutionResult]:
         self.logger.info(f"Processing queue message", message_id=message.id, correlation_id=message.correlation_id)
-        run = self._fetch_run_data(message)
-        if not run:
-            return
 
-        tool_calls = self._extract_tool_calls(run)
-        if not tool_calls:
-            self.logger.info(f"No tool calls found for run", run_id=message.run_id,
-                             correlation_id=message.correlation_id)
+        function_executions: list[FunctionExecution] = []
+        result = ExecutionResult(execution_type=message.object)
 
-        function_executions = self._process_tool_calls(tool_calls)
+        match message.object:
+            case ExecType.OPENAI_RUN:
+                run = self._fetch_run_data(message)
+                if not run:
+                    return
 
-        result = RunResult(run_id=message.run_id, thread_id=message.thread_id)
+                tool_calls = self._extract_run_tool_calls(run)
+                if not tool_calls:
+                    self.logger.info(f"No tool calls found for run", run_id=message.body.get("run_id"),
+                                     correlation_id=message.correlation_id)
+
+                [function_executions.append(x) for x in self._process_tool_calls(tool_calls)]
+
+                result.run_id = message.body.get("run_id")
+                result.thread_id = message.body.get("thread_id")
+
+            case ExecType.OPENAI_CHAT_COMPLETION:
+                if message.body["choices"][0]["message"]["tool_calls"]:
+                    tool_calls = [x for x in message.body["choices"][0]["message"]["tool_calls"]]
+                    [function_executions.append(x) for x in self._process_tool_calls(tool_calls)]
+                else:
+                    self.logger.info(f"No tool calls found for chat completion", id=message.body["id"],
+                                     correlation_id=message.correlation_id)
 
         for fe in function_executions:
             r = self._execute_function(fe, message)
-            if isinstance(r, str) or r is None:
-                result.tool_outputs.append({"tool_call_id": fe.tool_call_id, "output": r})
-            else:
-                self.logger.error(f"{fe.name} returned non-string value. openai expects functions to return a string.")
-                continue
-
+            match message.object:
+                case ExecType.OPENAI_RUN:
+                    if isinstance(r, str) or r is None:
+                        result.tool_outputs.append({"tool_call_id": fe.tool_call_id, "output": r})
+                    else:
+                        self.logger.error(
+                            f"{fe.name} returned non-string value. openai expects functions to return a string.")
+                        continue
+                case ExecType.OPENAI_CHAT_COMPLETION:
+                    if isinstance(r, str) or r is None:
+                            result.tool_outputs.append({"role": "tool", "tool_call_id": fe.tool_call_id, "content": r})
+                    else:
+                        self.logger.error(
+                            f"{fe.name} returned non-string value. openai expects functions to return a string.")
+                        continue
         return result
 
-    def _submit_function_results(self, result: RunResult) -> bool:
+    def _submit_openai_run_results(self, result: ExecutionResult) -> bool:
         self.logger.info(f"Submitting function results", run_id=result.run_id, correlation_id=result.thread_id)
         url = f"{self.proxy_host}/v1/threads/{result.thread_id}/runs/{result.run_id}/submit_tool_outputs"
         resp = self._make_request('post', url, None, result.dump_submission_response())
@@ -253,6 +277,21 @@ class FuncRunnerApp:
             return False
         self.logger.info(f"Successfully submitted function results", run_id=result.run_id,
                          correlation_id=result.thread_id)
+        return True
+
+    def _submit_openai_chat_results(self, result: ExecutionResult, chat: dict) -> bool:
+        self.logger.info(f"Submitting chat function results", correlation_id=result.thread_id)
+        url = f"{self.proxy_host}/v1/chat/completions"
+        body = {
+            "messages": result.tool_outputs,
+            "metadata": {
+                "fr_originating_id": chat.get("id"),
+            }
+        }
+        resp = self._make_request('post', url, None, data=json.dumps(body))
+        if resp is None or resp.status_code != 200:
+            return False
+        self.logger.info(f"Successfully submitted function results", correlation_id=result.thread_id)
         return True
 
     def _dequeue_message(self) -> Optional[Message]:
@@ -322,13 +361,17 @@ class FuncRunnerApp:
             while self.is_running:
                 message = self._dequeue_message()
 
-                run_result = None
+                exec_result = None
                 if message:
-                    run_result = self._process_queue_message(message)
+                    exec_result = self._process_queue_message(message)
 
                 success = False
-                if run_result:
-                    success = self._submit_function_results(run_result)
+                if exec_result:
+                    match message.object:
+                        case ExecType.OPENAI_RUN:
+                            success = self._submit_openai_run_results(exec_result)
+                        case ExecType.OPENAI_CHAT_COMPLETION:
+                            success = self._submit_openai_chat_results(exec_result, message.body)
                 if success:
                     self._delete_message(message)
 

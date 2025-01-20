@@ -1,7 +1,7 @@
 import requests
 
 from funcrunner.app import FuncRunnerApp
-from funcrunner.models import Message
+from funcrunner.models import Message, OpenAIRunBody, ExecType
 
 
 def test_health_check(application):
@@ -19,8 +19,8 @@ def test_application(application):
     queue_items = [
         Message(
             id="1",
-            run_id="run1",
-            thread_id="thread1",
+            object=ExecType.OPENAI_RUN,
+            body={"run_id": "run1", "thread_id": "thread1"},
             integration_id="int1",
             correlation_id="corr1",
             expires_at="2024-12-31T23:59:59Z",
@@ -29,8 +29,8 @@ def test_application(application):
         ),
         Message(
             id="2",
-            run_id="run2",
-            thread_id="thread2",
+            object=ExecType.OPENAI_RUN,
+            body={"run_id": "run2", "thread_id": "thread2"},
             integration_id="int2",
             correlation_id="corr2",
             expires_at="2024-12-31T23:59:59Z",
@@ -39,8 +39,8 @@ def test_application(application):
         ),
         Message(
             id="3",
-            run_id="run3",
-            thread_id="thread3",
+            object=ExecType.OPENAI_RUN,
+            body={"run_id": "run3", "thread_id": "thread3"},
             integration_id="int3",
             correlation_id="corr3",
             expires_at="2024-12-31T23:59:59Z",
@@ -49,8 +49,8 @@ def test_application(application):
         ),
         Message(
             id="4",
-            run_id="run4",
-            thread_id="thread4",
+            object=ExecType.OPENAI_RUN,
+            body={"run_id": "run4", "thread_id": "thread4"},
             integration_id="int4",
             correlation_id="corr4",
             expires_at="2024-12-31T23:59:59Z",
@@ -59,8 +59,8 @@ def test_application(application):
         ),
         Message(
             id="5",
-            run_id="run5",
-            thread_id="thread5",
+            object=ExecType.OPENAI_RUN,
+            body={"run_id": "run5", "thread_id": "thread5"},
             integration_id="int5",
             correlation_id="corr5",
             expires_at="2024-12-31T23:59:59Z",
@@ -69,8 +69,8 @@ def test_application(application):
         ),
         Message(
             id="6",
-            run_id="run6",
-            thread_id="thread6",
+            object=ExecType.OPENAI_RUN,
+            body={"run_id": "run6", "thread_id": "thread6"},
             integration_id="int6",
             correlation_id="corr6",
             expires_at="2024-12-31T23:59:59Z",

@@ -10,6 +10,8 @@ from funcrunner.app import FuncRunnerApp
 
 load_dotenv()
 
+USE_LOCAL_SERVICES = os.getenv("USE_LOCAL_SERVICES", "false").lower() == "true"
+
 
 class StatusEnum(Enum):
     PENDING = "pending"
@@ -19,7 +21,8 @@ class StatusEnum(Enum):
 
 @pytest.fixture(scope="function")
 def application():
-    app = FuncRunnerApp()
+    app = FuncRunnerApp(enable_local_services=USE_LOCAL_SERVICES)
+    app.enable_local_services = USE_LOCAL_SERVICES
 
     @app.schedule("0/15 * * * *")
     def test_task():
@@ -64,12 +67,14 @@ def application():
     return app
 
 @pytest.fixture(scope="function")
-def openai_proxy():
+def openai_proxy(application):
+    app: FuncRunnerApp = application
+
     api_key = os.getenv("FUNCRUNNER_API_KEY")
 
     client = openai.OpenAI(
         api_key=api_key,
-        base_url="https://proxy.funcrunner.com/v1",
+        base_url=f"{app.proxy_host}/v1",
     )
     return client
 

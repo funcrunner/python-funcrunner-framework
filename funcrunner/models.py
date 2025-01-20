@@ -1,15 +1,21 @@
 import json
-from typing import Any, Union, Literal
+from enum import Enum
+from typing import Any, Union, Literal, Optional
 
+from openai.types.chat import ChatCompletion
 from pydantic import BaseModel, Field
 
+class ExecType(str, Enum):
+    OPENAI_RUN = "openai.run"
+    OPENAI_CHAT_COMPLETION = "openai.chat_completion"
+    ANTHROPIC_MESSAGE = "anthropic.message"
 
 class Message(BaseModel):
     id: str
     integration_id: str
     correlation_id: str
-    object: Literal["openai_run", "openai_chat_completion", "anthropic_messages"]
-    body: Union["OpenAIRunBody"]
+    object: ExecType
+    body: dict
     expires_at: str
     visible_at: str
     in_flight: bool
@@ -18,9 +24,10 @@ class OpenAIRunBody(BaseModel):
     run_id: str
     thread_id: str
 
-class RunResult(BaseModel):
-    run_id: str
-    thread_id: str
+class ExecutionResult(BaseModel):
+    execution_type: ExecType
+    run_id: Optional[str] = None
+    thread_id: Optional[str] = None
     tool_outputs: list[dict[str, str]] = Field(default_factory=list)
 
     def dump_submission_response(self):
