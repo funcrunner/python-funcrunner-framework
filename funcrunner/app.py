@@ -13,7 +13,6 @@ import requests
 import structlog
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from openai.types.chat import ChatCompletion
 
 from funcrunner.exceptions import AssistantException
 from funcrunner.health import HealthHandler
@@ -131,6 +130,22 @@ class FuncRunnerApp:
         definition = build_tool_definition(func=func, override_name=registry_key)
 
         return definition.model_dump(by_alias=True, exclude_none=True)
+
+    def _configure_auto_tools(self):
+        """Registers all functions in function_registry with a Func Runner."""
+        self.logger.info("Configuring auto tools...", assistant_id=self.assistant_id)
+
+        function_specs = [self._generate_function_spec(key, func) for key, func in self.function_registry.items()]
+
+        url = f"{self.proxy_host}/fr/tools"
+        update_resp = self._make_request('post', url, data=json.dumps(function_specs))
+        if update_resp.status_code != 200:
+            self.logger.error(f"Failed to update auto tools", url=url, status_code=update_resp.status_code,
+                              error=update_resp.text)
+            raise AssistantException(f"Failed to update auto tools with function specifications: {update_resp.text}")
+
+        self.logger.info("Finished updating auto tools...", assistant_id=self.assistant_id)
+
 
     def _configure_assistant(self):
         """Registers all functions in function_registry with an OpenAI assistant."""
@@ -281,15 +296,13 @@ class FuncRunnerApp:
 
     def _submit_openai_chat_results(self, result: ExecutionResult, chat: dict) -> bool:
         self.logger.info(f"Submitting chat function results", correlation_id=result.thread_id)
-        url = f"{self.proxy_host}/v1/chat/completions"
+        url = f"{self.proxy_host}/fr/chat/completions/{chat.get("id")}"
         body = {
-            "messages": result.tool_outputs,
-            "metadata": {
-                "fr_originating_id": chat.get("id"),
-            }
+            "messages": result.tool_outputs
         }
         resp = self._make_request('post', url, None, data=json.dumps(body))
         if resp is None or resp.status_code != 200:
+            self.logger.error(f"Failed to send results with error {resp.text}", correlation_id=result.thread_id)
             return False
         self.logger.info(f"Successfully submitted function results", correlation_id=result.thread_id)
         return True
@@ -347,6 +360,8 @@ class FuncRunnerApp:
         self.is_running = True
         self.scheduler.start()
 
+        if self.auto_update:
+            self._configure_auto_tools()
         if self.auto_update and self.assistant_id:
             self._configure_assistant()
 

@@ -1,10 +1,13 @@
 import os
+import threading
+import time
 from enum import Enum
 from typing import Any
 
 import openai
 import pytest
 from dotenv import load_dotenv
+from flask import Flask, request, jsonify
 
 from funcrunner.app import FuncRunnerApp
 
@@ -87,3 +90,51 @@ def assistant(openai_proxy):
     yield assistant
 
     openai_proxy.beta.assistants.delete(assistant.id)
+
+
+@pytest.fixture(scope="module")
+def test_webserver():
+    """
+    A fixture that starts a temporary Flask server to receive webhooks.
+
+    The server listens on a fixed port (5002) and defines a /webhook endpoint.
+    Received webhook payloads are stored in the 'received_payloads' list.
+    """
+    app = Flask(__name__)
+    received_payloads = []
+
+    @app.route('/webhook', methods=['POST'])
+    def webhook():
+        data = request.get_json()
+        print("Test webserver received webhook:", data)
+        received_payloads.append(data)
+        return jsonify({"status": "received"}), 200
+
+    # Choose a port for the test webserver.
+    port = 5002
+
+    # Define a function to run the app. We disable the reloader to avoid spawning extra processes.
+    def run_server():
+        app.run(port=port, debug=False, use_reloader=False)
+
+    # Start the Flask server in a background thread.
+    server_thread = threading.Thread(target=run_server, daemon=True)
+    server_thread.start()
+
+    # Give the server a moment to start up.
+    time.sleep(1)
+
+    # Create a simple object to return the necessary properties.
+    class WebhookServer:
+        pass
+
+    test_server = WebhookServer()
+    test_server.url = f"http://localhost:{port}/webhook"
+    test_server.received_payloads = received_payloads
+
+    # Yield the test server object to the test.
+    yield test_server
+
+    # Teardown can be performed here if needed. With Flask's built-in server,
+    # shutdown can be more complicated. In tests, it's often acceptable to let the
+    # daemon thread exit when the process ends.

@@ -4,6 +4,7 @@ from time import sleep
 from openai import OpenAI
 
 from funcrunner.app import FuncRunnerApp
+from funcrunner.models import ExecType
 
 
 def test_queue_path(openai_proxy, application, assistant):
@@ -26,13 +27,15 @@ def test_queue_path(openai_proxy, application, assistant):
 
     while datetime.datetime.now(datetime.UTC) < expiration:
         message = app._dequeue_message()
-        if message and message.body["run_id"] == run.id:
-            run_result = app._process_queue_message(message)
+        if message and message.object == ExecType.OPENAI_RUN:
+            if message.body["run_id"] == run.id:
+                run_result = app._process_queue_message(message)
 
-            app._submit_openai_run_results(run_result)
-            app._delete_message(message)
-            break
+                app._submit_openai_run_results(run_result)
+                app._delete_message(message)
+                break
         sleep(1)
+
 
     while datetime.datetime.now(datetime.UTC) < expiration:
         run = client.beta.threads.runs.retrieve(run_id=run.id, thread_id=thread.id)
@@ -68,13 +71,14 @@ def test_queue_path_es(openai_proxy, application, assistant):
 
     while datetime.datetime.now(datetime.UTC) < expiration:
         message = app._dequeue_message()
-        if message and message.body["run_id"] == run.id:
-            run_result = app._process_queue_message(message)
+        if message and message.object == ExecType.OPENAI_RUN:
+            if message.body["run_id"] == run.id:
+                run_result = app._process_queue_message(message)
 
-            app._submit_openai_run_results(run_result)
-            app._delete_message(message)
-            break
-        sleep(1)
+                app._submit_openai_run_results(run_result)
+                app._delete_message(message)
+                break
+            sleep(1)
 
     while datetime.datetime.now(datetime.UTC) < expiration:
         run = client.beta.threads.runs.retrieve(run_id=run.id, thread_id=thread.id)

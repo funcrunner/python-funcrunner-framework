@@ -1,9 +1,9 @@
 import json
 from enum import Enum
-from typing import Any, Union, Literal, Optional
+from typing import Any, Optional
 
-from openai.types.chat import ChatCompletion
 from pydantic import BaseModel, Field
+
 
 class ExecType(str, Enum):
     OPENAI_RUN = "openai.run"

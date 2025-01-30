@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "funcrunner"
-version = "1.1.10"
+version = "1.1.11"
 description = "A managed function calling framework for OpenAI Assistants."
 authors = ["Matthew Orahood <morahood@gmail.com>"]
 homepage="https://funcrunner.com"
@@ -14,14 +14,14 @@ requests = "^2.32.3"
 pydantic = "^2.10.3"
 structlog = "^25.1.0"
 apscheduler = "^3.11.0"
-openai = "^1.59.8"
+openai = "^1.59.9"
 
 [tool.poetry.group.test]
 optional = true
 
 [tool.poetry.group.test.dependencies]
 python-dotenv = "^1.0.1"
-
+flask = "^3.1.0"
 pytest = "^8.3.3"
 coverage = "^7.6.7"
 
