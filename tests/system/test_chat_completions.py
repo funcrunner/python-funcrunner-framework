@@ -28,7 +28,7 @@ def test_handles_basic_tool_call(openai_proxy, application):
     app.function_registry["greet"] = greet_mock
 
     response = client.chat.completions.create(
-        model="gpt-4-turbo",
+        model="gpt-3.5-turbo",
         messages=[{"role": "user", "content": "Generate a greeting for the first president of the United States."}],
         tools=[
             {
@@ -65,6 +65,31 @@ def test_handles_basic_tool_call(openai_proxy, application):
 
     assert greet_mock.call_count > 0
 
+def test_tool_injection(openai_proxy, application):
+    client: OpenAI = openai_proxy
+    app: FuncRunnerApp = application
+    app._configure_auto_tools()
+
+    greet_mock = MagicMock(return_value="Greetings from Func Runner, George Washington!")
+    app.function_registry["greet"] = greet_mock
+
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": "Generate a greeting for the first president of the United States."}],
+    )
+
+    expiration = datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=30)
+
+    while datetime.datetime.now(datetime.UTC) < expiration:
+        message = app._dequeue_message()
+        if message and message.object == ExecType.OPENAI_CHAT_COMPLETION:
+            app._process_queue_message(message)
+            app._delete_message(message)
+            break
+        time.sleep(1)
+
+    assert greet_mock.call_count > 0
+
 
 def test_sends_webhook_response(openai_proxy, application, test_webserver):
     client: OpenAI = openai_proxy
@@ -74,7 +99,7 @@ def test_sends_webhook_response(openai_proxy, application, test_webserver):
     webhook_url = test_webserver.url
 
     response = client.chat.completions.create(
-        model="gpt-4-turbo",
+        model="gpt-3.5-turbo",
         messages=[{"role": "user", "content": "Generate a greeting for the first president of the United States."}],
         tool_choice="required",
         tools=[

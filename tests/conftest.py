@@ -84,7 +84,7 @@ def openai_proxy(application):
 @pytest.fixture(scope="function")
 def assistant(openai_proxy):
     assistant = openai_proxy.beta.assistants.create(
-        model="gpt-4-turbo",
+        model="gpt-3.5-turbo-1106",
         tools=[{"type": "file_search"}, {"type": "code_interpreter"}]
     )
     yield assistant
