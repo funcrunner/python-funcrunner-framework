@@ -4,6 +4,7 @@ import time
 from enum import Enum
 from typing import Any
 
+import anthropic
 import openai
 import pytest
 from dotenv import load_dotenv
@@ -82,6 +83,16 @@ def openai_proxy(application):
     return client
 
 @pytest.fixture(scope="function")
+def anthropic_proxy(application):
+    app: FuncRunnerApp = application
+    api_key = os.getenv("ANTHROPIC_FR_API_KEY")
+    client = anthropic.Client(
+        api_key=api_key,
+        base_url=app.proxy_host,
+    )
+    return client
+
+@pytest.fixture(scope="function")
 def assistant(openai_proxy):
     assistant = openai_proxy.beta.assistants.create(
         model="gpt-3.5-turbo-1106",
@@ -92,7 +103,7 @@ def assistant(openai_proxy):
     openai_proxy.beta.assistants.delete(assistant.id)
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def test_webserver():
     """
     A fixture that starts a temporary Flask server to receive webhooks.

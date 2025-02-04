@@ -113,7 +113,8 @@ class FuncRunnerApp:
 
     def _fetch_run_data(self, message: Message):
         url = f"{self.proxy_host}/v1/threads/{message.body.get("thread_id")}/runs/{message.body.get("run_id")}"
-        self.logger.debug(f"Fetching run data from URL: {url}", message_id=message.id, run_id=message.body.get("run_id"),
+        self.logger.debug(f"Fetching run data from URL: {url}", message_id=message.id,
+                          run_id=message.body.get("run_id"),
                           correlation_id=message.correlation_id)
         response = self._make_request('get', url, message)
         if response is not None and response.status_code == 200:
@@ -145,7 +146,6 @@ class FuncRunnerApp:
             raise AssistantException(f"Failed to update auto tools with function specifications: {update_resp.text}")
 
         self.logger.info("Finished updating auto tools...", assistant_id=self.assistant_id)
-
 
     def _configure_assistant(self):
         """Registers all functions in function_registry with an OpenAI assistant."""
@@ -265,6 +265,13 @@ class FuncRunnerApp:
                     self.logger.info(f"No tool calls found for chat completion", id=message.body["id"],
                                      correlation_id=message.correlation_id)
 
+            case ExecType.ANTHROPIC_MESSAGE:
+                if message.body["tool_calls"]:
+                    tool_calls = [x for x in message.body["tool_calls"]]
+                    [function_executions.append(x) for x in self._process_tool_calls(tool_calls)]
+                else:
+                    self.logger.info(f"No tool calls found for messages", id=message.body["id"],
+                                     correlation_id=message.correlation_id)
         for fe in function_executions:
             r = self._execute_function(fe, message)
             match message.object:
@@ -277,7 +284,7 @@ class FuncRunnerApp:
                         continue
                 case ExecType.OPENAI_CHAT_COMPLETION:
                     if isinstance(r, str) or r is None:
-                            result.tool_outputs.append({"role": "tool", "tool_call_id": fe.tool_call_id, "content": r})
+                        result.tool_outputs.append({"role": "tool", "tool_call_id": fe.tool_call_id, "content": r})
                     else:
                         self.logger.error(
                             f"{fe.name} returned non-string value. openai expects functions to return a string.")
@@ -303,6 +310,20 @@ class FuncRunnerApp:
         resp = self._make_request('post', url, None, data=json.dumps(body))
         if resp is None or resp.status_code != 200:
             self.logger.error(f"Failed to send results with error {resp.text}", correlation_id=result.thread_id)
+            return False
+        self.logger.info(f"Successfully submitted function results", correlation_id=result.thread_id)
+        return True
+
+    def _submit_anthropic_message_results(self, result: ExecutionResult, chat: dict):
+        self.logger.info(f"Submitting Anthropic message results", correlation_id=result.thread_id)
+        url = f"{self.proxy_host}/fr/messages/{chat.get("id")}"
+        body = {
+            "messages": result.tool_outputs
+        }
+        resp = self._make_request('post', url, None, data=json.dumps(body))
+        if resp is None or resp.status_code != 200:
+            self.logger.error(f"Failed to send results with error {resp.text}", correlation_id=result.thread_id,
+                              url=url)
             return False
         self.logger.info(f"Successfully submitted function results", correlation_id=result.thread_id)
         return True
@@ -387,6 +408,8 @@ class FuncRunnerApp:
                             success = self._submit_openai_run_results(exec_result)
                         case ExecType.OPENAI_CHAT_COMPLETION:
                             success = self._submit_openai_chat_results(exec_result, message.body)
+                        case ExecType.ANTHROPIC_MESSAGE:
+                            success = self._submit_anthropic_message_results(exec_result, message.body)
                 if success:
                     self._delete_message(message)
 
